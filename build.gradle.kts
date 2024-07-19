@@ -8,13 +8,14 @@ version = "1.0-SNAPSHOT"
 
 repositories {
     mavenCentral()
+    maven("https://repo.codemc.io/repository/maven-releases/")
     maven("https://repo.dmulloy2.net/repository/public/")
 }
 
 dependencies {
     paperweight.paperDevBundle(libs.versions.paperApi.get())
 
-    compileOnly(libs.protocol.lib)
+    compileOnly(libs.packet.events)
 }
 
 java {

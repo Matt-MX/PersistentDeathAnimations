@@ -1,39 +1,46 @@
 package co.pvphub.pda;
 
-import com.comphenix.protocol.PacketType;
-import com.comphenix.protocol.ProtocolManager;
-import com.comphenix.protocol.events.PacketAdapter;
-import com.comphenix.protocol.events.PacketContainer;
-import com.comphenix.protocol.events.PacketEvent;
-import com.comphenix.protocol.wrappers.WrappedDataWatcher;
-import it.unimi.dsi.fastutil.ints.IntArrayList;
+import com.github.retrooper.packetevents.PacketEvents;
+import com.github.retrooper.packetevents.event.PacketListenerAbstract;
+import com.github.retrooper.packetevents.event.PacketSendEvent;
+import com.github.retrooper.packetevents.protocol.entity.data.EntityData;
+import com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes;
+import com.github.retrooper.packetevents.protocol.packettype.PacketType;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDestroyEntities;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityMetadata;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityStatus;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
-public class OutgoingPlayerDeathListener extends PacketAdapter {
+public class OutgoingPlayerDeathListener extends PacketListenerAbstract {
     private static final byte ENTITY_DEATH_EVENT_ID = 3;
-    private final ProtocolManager manager;
     private final DeathAnimationsPlugin deathAnimations;
     private final double cancelDistanceSquared;
 
-    public OutgoingPlayerDeathListener(DeathAnimationsPlugin deathAnimationsPlugin, ProtocolManager manager) {
-        super(deathAnimationsPlugin, PacketType.Play.Server.ENTITY_DESTROY);
-        this.manager = manager;
+    public OutgoingPlayerDeathListener(DeathAnimationsPlugin deathAnimationsPlugin) {
         this.deathAnimations = deathAnimationsPlugin;
         this.cancelDistanceSquared = Bukkit.getSimulationDistance() * 16.0;
     }
 
     @Override
-    public void onPacketSending(PacketEvent event) {
-        Player playerSendingTo = event.getPlayer();
-        PacketContainer packet = event.getPacket();
+    public void onPacketSend(PacketSendEvent event) {
+        if (event.getPacketType() != PacketType.Play.Server.DESTROY_ENTITIES) return;
 
-        IntArrayList entityIds = (IntArrayList) packet.getModifier().read(0);
+        Player playerSendingTo = (Player) event.getPlayer();
+        WrapperPlayServerDestroyEntities packet = new WrapperPlayServerDestroyEntities(event);
 
-        for (int entityId : entityIds) {
+        List<Integer> remainingToSend = new ArrayList<>(Arrays.stream(packet.getEntityIds())
+            .boxed()
+            .toList());
+
+        for (int entityId : packet.getEntityIds()) {
             DeathListener.DeathCache cached = deathAnimations.getDeathListener().getCachedDeath(entityId);
 
             if (cached == null) continue;
@@ -41,37 +48,31 @@ public class OutgoingPlayerDeathListener extends PacketAdapter {
             long millis = cached.getMillisSinceDeath();
             if (millis > 1000) continue;
 
+            // To get around removeAt(int index) being invoked
+            remainingToSend.removeIf((i) -> i == entityId);
             event.setCancelled(true);
 
             // Send a death packet instead
-            PacketContainer healthPacket = manager.createPacket(PacketType.Play.Server.ENTITY_METADATA);
-            healthPacket.getIntegers().write(0, entityId);
+            WrapperPlayServerEntityMetadata healthPacket = new WrapperPlayServerEntityMetadata(
+                entityId, List.of(new EntityData(9, EntityDataTypes.FLOAT, 0.0f))
+            );
 
-            WrappedDataWatcher watcher = new WrappedDataWatcher();
-            watcher.setEntity(cached.player());
-            watcher.setObject(3, WrappedDataWatcher.Registry.get(Float.class), 0f);
+            WrapperPlayServerEntityStatus deathPacket = new WrapperPlayServerEntityStatus(entityId, ENTITY_DEATH_EVENT_ID);
 
-            healthPacket.getWatchableCollectionModifier().write(0, watcher.getWatchableObjects());
+            PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, healthPacket);
+            PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, deathPacket);
 
-            PacketContainer deathPacket = manager.createPacket(PacketType.Play.Server.ENTITY_STATUS);
-            deathPacket.getIntegers().write(0, entityId);
-            deathPacket.getBytes().write(0, ENTITY_DEATH_EVENT_ID);
-
-            Bukkit.getAsyncScheduler().runDelayed(getPlugin(), (task) -> {
-                Bukkit.broadcast(Component.text("Sending death animation packet"));
-                manager.sendServerPacket(playerSendingTo, healthPacket);
-                manager.sendServerPacket(playerSendingTo, deathPacket);
-            }, 100L, TimeUnit.MILLISECONDS);
-
-            PacketContainer cloned = packet.shallowClone();
-            Bukkit.getAsyncScheduler().runDelayed(getPlugin(), (task) -> {
+            Bukkit.getAsyncScheduler().runDelayed(deathAnimations, (task) -> {
                 if (playerSendingTo.getWorld() == cached.player().getWorld() &&
                     playerSendingTo.getLocation().distanceSquared(cached.player().getLocation()) < cancelDistanceSquared)
                     return;
 
-                manager.sendServerPacket(playerSendingTo, cloned);
-                Bukkit.broadcast(Component.text("Sending remove packet"));
+                WrapperPlayServerDestroyEntities removePacket = new WrapperPlayServerDestroyEntities(entityId);
+                PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, removePacket);
             }, 1L, TimeUnit.SECONDS);
         }
+
+        WrapperPlayServerDestroyEntities remainingPacket = new WrapperPlayServerDestroyEntities(remainingToSend.stream().mapToInt(i -> i).toArray());
+        PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, remainingPacket);
     }
 }
