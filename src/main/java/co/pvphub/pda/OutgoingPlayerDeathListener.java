@@ -1,0 +1,77 @@
+package co.pvphub.pda;
+
+import com.comphenix.protocol.PacketType;
+import com.comphenix.protocol.ProtocolManager;
+import com.comphenix.protocol.events.PacketAdapter;
+import com.comphenix.protocol.events.PacketContainer;
+import com.comphenix.protocol.events.PacketEvent;
+import com.comphenix.protocol.wrappers.WrappedDataWatcher;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import net.kyori.adventure.text.Component;
+import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
+
+import java.util.concurrent.TimeUnit;
+
+public class OutgoingPlayerDeathListener extends PacketAdapter {
+    private static final byte ENTITY_DEATH_EVENT_ID = 3;
+    private final ProtocolManager manager;
+    private final DeathAnimationsPlugin deathAnimations;
+    private final double cancelDistanceSquared;
+
+    public OutgoingPlayerDeathListener(DeathAnimationsPlugin deathAnimationsPlugin, ProtocolManager manager) {
+        super(deathAnimationsPlugin, PacketType.Play.Server.ENTITY_DESTROY);
+        this.manager = manager;
+        this.deathAnimations = deathAnimationsPlugin;
+        this.cancelDistanceSquared = Bukkit.getSimulationDistance() * 16.0;
+    }
+
+    @Override
+    public void onPacketSending(PacketEvent event) {
+        Player playerSendingTo = event.getPlayer();
+        PacketContainer packet = event.getPacket();
+
+        IntArrayList entityIds = (IntArrayList) packet.getModifier().read(0);
+
+        for (int entityId : entityIds) {
+            DeathListener.DeathCache cached = deathAnimations.getDeathListener().getCachedDeath(entityId);
+
+            if (cached == null) continue;
+
+            long millis = cached.getMillisSinceDeath();
+            if (millis > 1000) continue;
+
+            event.setCancelled(true);
+
+            // Send a death packet instead
+            PacketContainer healthPacket = manager.createPacket(PacketType.Play.Server.ENTITY_METADATA);
+            healthPacket.getIntegers().write(0, entityId);
+
+            WrappedDataWatcher watcher = new WrappedDataWatcher();
+            watcher.setEntity(cached.player());
+            watcher.setObject(3, WrappedDataWatcher.Registry.get(Float.class), 0f);
+
+            healthPacket.getWatchableCollectionModifier().write(0, watcher.getWatchableObjects());
+
+            PacketContainer deathPacket = manager.createPacket(PacketType.Play.Server.ENTITY_STATUS);
+            deathPacket.getIntegers().write(0, entityId);
+            deathPacket.getBytes().write(0, ENTITY_DEATH_EVENT_ID);
+
+            Bukkit.getAsyncScheduler().runDelayed(getPlugin(), (task) -> {
+                Bukkit.broadcast(Component.text("Sending death animation packet"));
+                manager.sendServerPacket(playerSendingTo, healthPacket);
+                manager.sendServerPacket(playerSendingTo, deathPacket);
+            }, 100L, TimeUnit.MILLISECONDS);
+
+            PacketContainer cloned = packet.shallowClone();
+            Bukkit.getAsyncScheduler().runDelayed(getPlugin(), (task) -> {
+                if (playerSendingTo.getWorld() == cached.player().getWorld() &&
+                    playerSendingTo.getLocation().distanceSquared(cached.player().getLocation()) < cancelDistanceSquared)
+                    return;
+
+                manager.sendServerPacket(playerSendingTo, cloned);
+                Bukkit.broadcast(Component.text("Sending remove packet"));
+            }, 1L, TimeUnit.SECONDS);
+        }
+    }
+}

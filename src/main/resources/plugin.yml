@@ -1,0 +1,7 @@
+name: PersistentDeathAnimations
+main: co.pvphub.pda.DeathAnimationsPlugin
+author: MattMX
+version: 1.0
+api-version: 1.18
+depend:
+  - "ProtocolLib"
