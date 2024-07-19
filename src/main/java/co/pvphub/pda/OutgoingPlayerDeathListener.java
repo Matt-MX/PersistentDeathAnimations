@@ -11,6 +11,9 @@ import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 public class OutgoingPlayerDeathListener extends PacketAdapter {
@@ -33,6 +36,8 @@ public class OutgoingPlayerDeathListener extends PacketAdapter {
 
         IntArrayList entityIds = (IntArrayList) packet.getModifier().read(0);
 
+        List<Integer> remainingToSend = new ArrayList<>(Arrays.stream(entityIds.toArray(new int[]{})).boxed().toList());
+
         for (int entityId : entityIds) {
             DeathListener.DeathCache cached = deathAnimations.getDeathListener().getCachedDeath(entityId);
 
@@ -41,6 +46,7 @@ public class OutgoingPlayerDeathListener extends PacketAdapter {
             long millis = cached.getMillisSinceDeath();
             if (millis > 1000) continue;
 
+            remainingToSend.remove(entityId);
             event.setCancelled(true);
 
             // Send a death packet instead
@@ -49,7 +55,7 @@ public class OutgoingPlayerDeathListener extends PacketAdapter {
 
             WrappedDataWatcher watcher = new WrappedDataWatcher();
             watcher.setEntity(cached.player());
-            watcher.setObject(3, WrappedDataWatcher.Registry.get(Float.class), 0f);
+            watcher.setObject(9, WrappedDataWatcher.Registry.get(Float.class), 0f);
 
             healthPacket.getWatchableCollectionModifier().write(0, watcher.getWatchableObjects());
 
@@ -58,20 +64,25 @@ public class OutgoingPlayerDeathListener extends PacketAdapter {
             deathPacket.getBytes().write(0, ENTITY_DEATH_EVENT_ID);
 
             Bukkit.getAsyncScheduler().runDelayed(getPlugin(), (task) -> {
-                Bukkit.broadcast(Component.text("Sending death animation packet"));
                 manager.sendServerPacket(playerSendingTo, healthPacket);
                 manager.sendServerPacket(playerSendingTo, deathPacket);
             }, 100L, TimeUnit.MILLISECONDS);
 
-            PacketContainer cloned = packet.shallowClone();
             Bukkit.getAsyncScheduler().runDelayed(getPlugin(), (task) -> {
                 if (playerSendingTo.getWorld() == cached.player().getWorld() &&
                     playerSendingTo.getLocation().distanceSquared(cached.player().getLocation()) < cancelDistanceSquared)
                     return;
 
-                manager.sendServerPacket(playerSendingTo, cloned);
-                Bukkit.broadcast(Component.text("Sending remove packet"));
+                PacketContainer removePacket = manager.createPacket(PacketType.Play.Server.ENTITY_DESTROY);
+                removePacket.getModifier().write(0, new IntArrayList(new int[] { entityId }));
+
+                manager.sendServerPacket(playerSendingTo, removePacket);
             }, 1L, TimeUnit.SECONDS);
         }
+
+        PacketContainer remaining = manager.createPacket(PacketType.Play.Server.ENTITY_DESTROY);
+        remaining.getModifier().write(0, new IntArrayList(remainingToSend));
+
+        manager.sendServerPacket(playerSendingTo, remaining);
     }
 }
