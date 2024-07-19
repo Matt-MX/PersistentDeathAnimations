@@ -46,7 +46,7 @@ public class OutgoingPlayerDeathListener extends PacketAdapter {
             long millis = cached.getMillisSinceDeath();
             if (millis > 1000) continue;
 
-            remainingToSend.remove(entityId);
+            remainingToSend.removeIf((i) -> i == entityId);
             event.setCancelled(true);
 
             // Send a death packet instead
@@ -76,13 +76,19 @@ public class OutgoingPlayerDeathListener extends PacketAdapter {
                 PacketContainer removePacket = manager.createPacket(PacketType.Play.Server.ENTITY_DESTROY);
                 removePacket.getModifier().write(0, new IntArrayList(new int[] { entityId }));
 
-                manager.sendServerPacket(playerSendingTo, removePacket);
+                manager.sendServerPacket(playerSendingTo, removePacket, false);
             }, 1L, TimeUnit.SECONDS);
+        }
+
+        // Nothing was changed, we should make sure it is not cancelled
+        if (remainingToSend.size() == entityIds.size()) {
+            event.setCancelled(false);
+            return;
         }
 
         PacketContainer remaining = manager.createPacket(PacketType.Play.Server.ENTITY_DESTROY);
         remaining.getModifier().write(0, new IntArrayList(remainingToSend));
 
-        manager.sendServerPacket(playerSendingTo, remaining);
+        manager.sendServerPacket(playerSendingTo, remaining, false);
     }
 }
