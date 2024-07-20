@@ -18,15 +18,13 @@ public class DeathListener implements Listener {
     }
 
     public DeathCache getCachedDeath(int entityId) {
-        return deaths.get(entityId);
+        return deaths.remove(entityId);
     }
 
     @EventHandler
     public void onDeath(PlayerDeathEvent event) {
-        System.out.println("death");
+        // possible memory leak? shouldn't be a problem
         deaths.put(event.getPlayer().getEntityId(), new DeathCache(event.getPlayer(), System.currentTimeMillis()));
-
-        // todo remove a few seconds later
     }
 
     public record DeathCache(Player player, Long timeOfDeath) {

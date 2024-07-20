@@ -11,6 +11,7 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEn
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityStatus;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
@@ -63,8 +64,7 @@ public class OutgoingPlayerDeathListener extends PacketListenerAbstract {
             PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, deathPacket);
 
             Bukkit.getAsyncScheduler().runDelayed(deathAnimations, (task) -> {
-                if (playerSendingTo.getWorld() == cached.player().getWorld() &&
-                    playerSendingTo.getLocation().distanceSquared(cached.player().getLocation()) < cancelDistanceSquared)
+                if (shouldCancelRemovePacket(playerSendingTo, cached.player()))
                     return;
 
                 WrapperPlayServerDestroyEntities removePacket = new WrapperPlayServerDestroyEntities(entityId);
@@ -74,5 +74,13 @@ public class OutgoingPlayerDeathListener extends PacketListenerAbstract {
 
         WrapperPlayServerDestroyEntities remainingPacket = new WrapperPlayServerDestroyEntities(remainingToSend.stream().mapToInt(i -> i).toArray());
         PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, remainingPacket);
+    }
+
+    private boolean shouldCancelRemovePacket(Player sending, Player dead) {
+        boolean world = sending.getWorld() == dead.getWorld();
+        boolean distance = sending.getLocation().distanceSquared(dead.getLocation()) < cancelDistanceSquared;
+        boolean canSee = sending.canSee(dead) && dead.getGameMode() != GameMode.SPECTATOR;
+
+        return world && distance && canSee;
     }
 }
