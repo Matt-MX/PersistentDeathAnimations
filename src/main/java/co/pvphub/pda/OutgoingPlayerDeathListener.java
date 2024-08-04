@@ -35,13 +35,16 @@ public class OutgoingPlayerDeathListener extends PacketListenerAbstract {
         if (event.getPacketType() != PacketType.Play.Server.DESTROY_ENTITIES) return;
 
         Player playerSendingTo = (Player) event.getPlayer();
-        WrapperPlayServerDestroyEntities packet = new WrapperPlayServerDestroyEntities(event);
 
-        List<Integer> remainingToSend = new ArrayList<>(Arrays.stream(packet.getEntityIds())
+        WrapperPlayServerDestroyEntities outgoingPacket = new WrapperPlayServerDestroyEntities(event);
+
+        List<Integer> remainingToSend = new ArrayList<>(Arrays.stream(outgoingPacket.getEntityIds())
             .boxed()
             .toList());
 
-        for (int entityId : packet.getEntityIds()) {
+        ArrayList<DeathListener.DeathCache> delayedSend = new ArrayList<>();
+
+        for (int entityId : outgoingPacket.getEntityIds()) {
             DeathListener.DeathCache cached = deathAnimations.getDeathListener().getCachedDeath(entityId);
 
             if (cached == null) continue;
@@ -49,11 +52,8 @@ public class OutgoingPlayerDeathListener extends PacketListenerAbstract {
             long millis = cached.getMillisSinceDeath();
             if (millis > 1000) continue;
 
-            // To get around removeAt(int index) being invoked
-            remainingToSend.removeIf((i) -> i == entityId);
-            event.setCancelled(true);
-
-            // Send a death packet instead
+            // Simulate the player dying for the user
+            // We first need to send a health packet because Mojank:tm:
             WrapperPlayServerEntityMetadata healthPacket = new WrapperPlayServerEntityMetadata(
                 entityId, List.of(new EntityData(9, EntityDataTypes.FLOAT, 0.0f))
             );
@@ -63,17 +63,38 @@ public class OutgoingPlayerDeathListener extends PacketListenerAbstract {
             PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, healthPacket);
             PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, deathPacket);
 
-            Bukkit.getAsyncScheduler().runDelayed(deathAnimations, (task) -> {
-                if (shouldCancelRemovePacket(playerSendingTo, cached.player()))
-                    return;
-
-                WrapperPlayServerDestroyEntities removePacket = new WrapperPlayServerDestroyEntities(entityId);
-                PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, removePacket);
-            }, 1L, TimeUnit.SECONDS);
+            delayedSend.add(cached);
+            remainingToSend.removeAll(List.of(entityId));
         }
 
-        WrapperPlayServerDestroyEntities remainingPacket = new WrapperPlayServerDestroyEntities(remainingToSend.stream().mapToInt(i -> i).toArray());
-        PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, remainingPacket);
+        // Nothing changed so there's no need to modify the packet
+        if (delayedSend.isEmpty()) {
+            event.setCancelled(false);
+            return;
+        } else {
+            event.setCancelled(true);
+        }
+
+        // Sends the remove packet 1s later for any valid entities
+        Bukkit.getAsyncScheduler().runDelayed(deathAnimations, (task) -> {
+            int[] entityIds = delayedSend.stream()
+                .filter(cache -> !shouldCancelRemovePacket(playerSendingTo, cache.player()))
+                .mapToInt(DeathListener.DeathCache::entityId)
+                .toArray();
+
+            WrapperPlayServerDestroyEntities delayedRemovePacket = new WrapperPlayServerDestroyEntities(entityIds);
+            PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, delayedRemovePacket);
+        }, 1L, TimeUnit.SECONDS);
+
+        // Still send destroy packets for entities that we didn't affect.
+        if (!remainingToSend.isEmpty()) {
+            int[] entityIds = remainingToSend.stream()
+                .mapToInt(i -> i)
+                .toArray();
+
+            WrapperPlayServerDestroyEntities notModifiedRemovePacket = new WrapperPlayServerDestroyEntities(entityIds);
+            PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, notModifiedRemovePacket);
+        }
     }
 
     private boolean shouldCancelRemovePacket(Player sending, Player dead) {

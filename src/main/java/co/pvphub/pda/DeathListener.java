@@ -24,10 +24,11 @@ public class DeathListener implements Listener {
     @EventHandler
     public void onDeath(PlayerDeathEvent event) {
         // possible memory leak? shouldn't be a problem
-        deaths.put(event.getPlayer().getEntityId(), new DeathCache(event.getPlayer(), System.currentTimeMillis()));
+        int entityId = event.getPlayer().getEntityId();
+        deaths.put(entityId, new DeathCache(event.getPlayer(), System.currentTimeMillis(), entityId));
     }
 
-    public record DeathCache(Player player, Long timeOfDeath) {
+    public record DeathCache(Player player, long timeOfDeath, int entityId) {
         public long getMillisSinceDeath() {
             return System.currentTimeMillis() - timeOfDeath;
         }
