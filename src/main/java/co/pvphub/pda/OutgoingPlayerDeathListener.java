@@ -27,7 +27,8 @@ public class OutgoingPlayerDeathListener extends PacketListenerAbstract {
 
     public OutgoingPlayerDeathListener(DeathAnimationsPlugin deathAnimationsPlugin) {
         this.deathAnimations = deathAnimationsPlugin;
-        this.cancelDistanceSquared = Bukkit.getSimulationDistance() * 16.0;
+        // https://media1.tenor.com/m/skdxV4R475EAAAAC/magic-mr-bean.gif
+        this.cancelDistanceSquared = Math.pow(Bukkit.getSimulationDistance() * 16.0, 2.0);
     }
 
     @Override
@@ -99,7 +100,7 @@ public class OutgoingPlayerDeathListener extends PacketListenerAbstract {
 
     private boolean shouldCancelRemovePacket(Player sending, Player dead) {
         boolean world = sending.getWorld() == dead.getWorld();
-        boolean distance = sending.getLocation().distanceSquared(dead.getLocation()) < cancelDistanceSquared;
+        boolean distance = sending.getLocation().distanceSquared(dead.getLocation()) <= cancelDistanceSquared;
         boolean canSee = sending.canSee(dead) && dead.getGameMode() != GameMode.SPECTATOR;
 
         return world && distance && canSee;
