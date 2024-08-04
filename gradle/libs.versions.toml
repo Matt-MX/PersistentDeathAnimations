@@ -3,10 +3,12 @@
 paperweight = "1.7.1"
 paperApi = "1.20.4-R0.1-SNAPSHOT"
 protocolLib = "5.2.0-SNAPSHOT"
+packetEvents = "2.4.0"
 
 [libraries]
 
 protocol-lib = { module = "com.comphenix.protocol:ProtocolLib", version.ref = "protocolLib" }
+packet-events = { module = "com.github.retrooper:packetevents-spigot", version.ref = "packetEvents" }
 
 [plugins]
 

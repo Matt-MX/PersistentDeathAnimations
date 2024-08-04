@@ -1,44 +1,51 @@
 package co.pvphub.pda;
 
-import com.comphenix.protocol.PacketType;
-import com.comphenix.protocol.ProtocolManager;
-import com.comphenix.protocol.events.PacketAdapter;
-import com.comphenix.protocol.events.PacketContainer;
-import com.comphenix.protocol.events.PacketEvent;
-import com.comphenix.protocol.wrappers.WrappedDataWatcher;
-import it.unimi.dsi.fastutil.ints.IntArrayList;
+import com.github.retrooper.packetevents.PacketEvents;
+import com.github.retrooper.packetevents.event.PacketListenerAbstract;
+import com.github.retrooper.packetevents.event.PacketSendEvent;
+import com.github.retrooper.packetevents.protocol.entity.data.EntityData;
+import com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes;
+import com.github.retrooper.packetevents.protocol.packettype.PacketType;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDestroyEntities;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityMetadata;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityStatus;
 import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.entity.Player;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
-public class OutgoingPlayerDeathListener extends PacketAdapter {
+public class OutgoingPlayerDeathListener extends PacketListenerAbstract {
     private static final byte ENTITY_DEATH_EVENT_ID = 3;
-    private final ProtocolManager manager;
     private final DeathAnimationsPlugin deathAnimations;
     private final double cancelDistanceSquared;
 
-    public OutgoingPlayerDeathListener(DeathAnimationsPlugin deathAnimationsPlugin, ProtocolManager manager) {
-        super(deathAnimationsPlugin, PacketType.Play.Server.ENTITY_DESTROY);
-        this.manager = manager;
+    public OutgoingPlayerDeathListener(DeathAnimationsPlugin deathAnimationsPlugin) {
         this.deathAnimations = deathAnimationsPlugin;
-        this.cancelDistanceSquared = Bukkit.getSimulationDistance() * 16.0;
+        // https://media1.tenor.com/m/skdxV4R475EAAAAC/magic-mr-bean.gif
+        this.cancelDistanceSquared = Math.pow(Bukkit.getSimulationDistance() * 16.0, 2.0);
     }
 
     @Override
-    public void onPacketSending(PacketEvent event) {
-        Player playerSendingTo = event.getPlayer();
-        PacketContainer packet = event.getPacket();
+    public void onPacketSend(PacketSendEvent event) {
+        if (event.getPacketType() != PacketType.Play.Server.DESTROY_ENTITIES) return;
 
-        IntArrayList entityIds = (IntArrayList) packet.getModifier().read(0);
+        Player playerSendingTo = (Player) event.getPlayer();
 
-        List<Integer> remainingToSend = new ArrayList<>(Arrays.stream(entityIds.toArray(new int[]{})).boxed().toList());
+        WrapperPlayServerDestroyEntities outgoingPacket = new WrapperPlayServerDestroyEntities(event);
 
-        for (int entityId : entityIds) {
+        List<Integer> remainingToSend = new ArrayList<>(Arrays.stream(outgoingPacket.getEntityIds())
+            .boxed()
+            .toList());
+
+        ArrayList<DeathListener.DeathCache> delayedSend = new ArrayList<>();
+
+        for (int entityId : outgoingPacket.getEntityIds()) {
             DeathListener.DeathCache cached = deathAnimations.getDeathListener().getCachedDeath(entityId);
 
             if (cached == null) continue;
@@ -46,49 +53,56 @@ public class OutgoingPlayerDeathListener extends PacketAdapter {
             long millis = cached.getMillisSinceDeath();
             if (millis > 1000) continue;
 
-            remainingToSend.removeIf((i) -> i == entityId);
-            event.setCancelled(true);
+            // Simulate the player dying for the user
+            // We first need to send a health packet because Mojank:tm:
+            WrapperPlayServerEntityMetadata healthPacket = new WrapperPlayServerEntityMetadata(
+                entityId, List.of(new EntityData(9, EntityDataTypes.FLOAT, 0.0f))
+            );
 
-            // Send a death packet instead
-            PacketContainer healthPacket = manager.createPacket(PacketType.Play.Server.ENTITY_METADATA);
-            healthPacket.getIntegers().write(0, entityId);
+            WrapperPlayServerEntityStatus deathPacket = new WrapperPlayServerEntityStatus(entityId, ENTITY_DEATH_EVENT_ID);
 
-            WrappedDataWatcher watcher = new WrappedDataWatcher();
-            watcher.setEntity(cached.player());
-            watcher.setObject(9, WrappedDataWatcher.Registry.get(Float.class), 0f);
+            PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, healthPacket);
+            PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, deathPacket);
 
-            healthPacket.getWatchableCollectionModifier().write(0, watcher.getWatchableObjects());
-
-            PacketContainer deathPacket = manager.createPacket(PacketType.Play.Server.ENTITY_STATUS);
-            deathPacket.getIntegers().write(0, entityId);
-            deathPacket.getBytes().write(0, ENTITY_DEATH_EVENT_ID);
-
-            Bukkit.getAsyncScheduler().runDelayed(getPlugin(), (task) -> {
-                manager.sendServerPacket(playerSendingTo, healthPacket);
-                manager.sendServerPacket(playerSendingTo, deathPacket);
-            }, 100L, TimeUnit.MILLISECONDS);
-
-            Bukkit.getAsyncScheduler().runDelayed(getPlugin(), (task) -> {
-                if (playerSendingTo.getWorld() == cached.player().getWorld() &&
-                    playerSendingTo.getLocation().distanceSquared(cached.player().getLocation()) < cancelDistanceSquared)
-                    return;
-
-                PacketContainer removePacket = manager.createPacket(PacketType.Play.Server.ENTITY_DESTROY);
-                removePacket.getModifier().write(0, new IntArrayList(new int[] { entityId }));
-
-                manager.sendServerPacket(playerSendingTo, removePacket, false);
-            }, 1L, TimeUnit.SECONDS);
+            delayedSend.add(cached);
+            remainingToSend.removeAll(List.of(entityId));
         }
 
-        // Nothing was changed, we should make sure it is not cancelled
-        if (remainingToSend.size() == entityIds.size()) {
+        // Nothing changed so there's no need to modify the packet
+        if (delayedSend.isEmpty()) {
             event.setCancelled(false);
             return;
+        } else {
+            event.setCancelled(true);
         }
 
-        PacketContainer remaining = manager.createPacket(PacketType.Play.Server.ENTITY_DESTROY);
-        remaining.getModifier().write(0, new IntArrayList(remainingToSend));
+        // Sends the remove packet 1s later for any valid entities
+        Bukkit.getAsyncScheduler().runDelayed(deathAnimations, (task) -> {
+            int[] entityIds = delayedSend.stream()
+                .filter(cache -> !shouldCancelRemovePacket(playerSendingTo, cache.player()))
+                .mapToInt(DeathListener.DeathCache::entityId)
+                .toArray();
 
-        manager.sendServerPacket(playerSendingTo, remaining, false);
+            WrapperPlayServerDestroyEntities delayedRemovePacket = new WrapperPlayServerDestroyEntities(entityIds);
+            PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, delayedRemovePacket);
+        }, 1L, TimeUnit.SECONDS);
+
+        // Still send destroy packets for entities that we didn't affect.
+        if (!remainingToSend.isEmpty()) {
+            int[] entityIds = remainingToSend.stream()
+                .mapToInt(i -> i)
+                .toArray();
+
+            WrapperPlayServerDestroyEntities notModifiedRemovePacket = new WrapperPlayServerDestroyEntities(entityIds);
+            PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, notModifiedRemovePacket);
+        }
+    }
+
+    private boolean shouldCancelRemovePacket(Player sending, Player dead) {
+        boolean world = sending.getWorld() == dead.getWorld();
+        boolean distance = sending.getLocation().distanceSquared(dead.getLocation()) <= cancelDistanceSquared;
+        boolean canSee = sending.canSee(dead) && dead.getGameMode() != GameMode.SPECTATOR;
+
+        return world && distance && canSee;
     }
 }
