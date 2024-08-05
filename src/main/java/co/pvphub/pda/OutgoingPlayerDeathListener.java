@@ -85,7 +85,7 @@ public class OutgoingPlayerDeathListener extends PacketListenerAbstract {
 
             WrapperPlayServerDestroyEntities delayedRemovePacket = new WrapperPlayServerDestroyEntities(entityIds);
             PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, delayedRemovePacket);
-        }, 1L, TimeUnit.SECONDS);
+        }, 750L, TimeUnit.MILLISECONDS);
 
         // Still send destroy packets for entities that we didn't affect.
         if (!remainingToSend.isEmpty()) {
@@ -106,9 +106,13 @@ public class OutgoingPlayerDeathListener extends PacketListenerAbstract {
             return false;
         }
 
-        boolean distance = sending.getLocation().distanceSquared(dead.getLocation()) <= cancelDistanceSquared;
+        // If they can't already see each other
         boolean canSee = sending.canSee(dead) && dead.getGameMode() != GameMode.SPECTATOR;
 
-        return distance && canSee;
+        if (!canSee) {
+            return false;
+        }
+
+        return sending.getLocation().distanceSquared(dead.getLocation()) <= cancelDistanceSquared;
     }
 }

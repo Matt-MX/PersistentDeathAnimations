@@ -25,6 +25,10 @@ public class DeathListener implements Listener {
 
     @EventHandler
     public void onDeath(PlayerDeathEvent event) {
+        if (Compatibility.isNPC(event.getEntity())) {
+            return;
+        }
+
         // possible memory leak? shouldn't be a problem
         int entityId = event.getPlayer().getEntityId();
 
