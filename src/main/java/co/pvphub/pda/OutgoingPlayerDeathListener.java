@@ -100,9 +100,15 @@ public class OutgoingPlayerDeathListener extends PacketListenerAbstract {
 
     private boolean shouldCancelRemovePacket(Player sending, Player dead) {
         boolean world = sending.getWorld() == dead.getWorld();
+
+        // If they're not in the same world there's no way to see one another
+        if (!world) {
+            return false;
+        }
+
         boolean distance = sending.getLocation().distanceSquared(dead.getLocation()) <= cancelDistanceSquared;
         boolean canSee = sending.canSee(dead) && dead.getGameMode() != GameMode.SPECTATOR;
 
-        return world && distance && canSee;
+        return distance && canSee;
     }
 }
