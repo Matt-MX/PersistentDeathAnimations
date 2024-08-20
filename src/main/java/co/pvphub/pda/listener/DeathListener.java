@@ -27,6 +27,10 @@ public class DeathListener implements Listener {
         return deaths.get(entityId);
     }
 
+    public @Nullable DeathCache removeCachedDeath(int entityId) {
+        return deaths.remove(entityId);
+    }
+
     @EventHandler
     public void onDeath(@NotNull PlayerDeathEvent event) {
         if (Compatibility.isNPC(event.getEntity())) {
