@@ -33,3 +33,17 @@ Get the api instance using Bukkit's plugin manager by name.
 To prevent a death animation from playing, hook into the Bukkit `PlayerDeathEvent` with an event priority of more than `NORMAL`.
 
 You can then remove the cached death with `plugin.getDeathListener().removeCachedDeath(int entityId)` or peek it with `DeathListener#getCachedDeath(int entityId)`
+
+Here's an example:
+```java
+
+@EventHandler(priority = EventPriority.HIGH)
+public void onDeath(@NotNull PlayerDeathEvent event) {
+    DeathAnimations deathAnimations = (DeathAnimations) Bukkit.getPluginManager().getPlugin("PersistentDeathAnimations");
+
+    // Insert some arbirtary check here as a condition to cancel the fake death.
+
+    deathAnimations.getDeathListener().removeCachedDeath(event.getPlayer().getEntityId());
+}
+
+```
