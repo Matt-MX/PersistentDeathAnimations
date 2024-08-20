@@ -5,3 +5,8 @@ version: 1.0
 api-version: 1.18
 depend:
   - "packetevents"
+
+commands:
+  death-animations-reload:
+    description: Reload the config.yml
+    permission: death-animations.reload

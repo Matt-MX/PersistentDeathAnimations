@@ -1,5 +1,6 @@
-package co.pvphub.pda;
+package co.pvphub.pda.listener;
 
+import co.pvphub.pda.DeathAnimationsPlugin;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
@@ -9,26 +10,24 @@ import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDestroyEntities;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityMetadata;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityStatus;
-import net.kyori.adventure.text.Component;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.entity.Player;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 public class OutgoingPlayerDeathListener extends PacketListenerAbstract {
     private static final byte ENTITY_DEATH_EVENT_ID = 3;
     private final DeathAnimationsPlugin deathAnimations;
     private final double cancelDistanceSquared;
+    private final LinkedList<ArrayList<DeathListener.DeathCache>> awaitingRemovalPacket = new LinkedList<>();
 
     public OutgoingPlayerDeathListener(DeathAnimationsPlugin deathAnimationsPlugin) {
         this.deathAnimations = deathAnimationsPlugin;
+
         // https://media1.tenor.com/m/skdxV4R475EAAAAC/magic-mr-bean.gif
-        this.cancelDistanceSquared = Math.pow(Bukkit.getSimulationDistance() * 16.0, 2.0);
+        this.cancelDistanceSquared = deathAnimations.getMaximumFakeDeathPlayDistance();
     }
 
     @Override
@@ -50,8 +49,10 @@ public class OutgoingPlayerDeathListener extends PacketListenerAbstract {
 
             if (cached == null) continue;
 
+            // In the case we're somehow processing an outdated packet
+            // Should not possible but a jank solution that works nonetheless
             long millis = cached.getMillisSinceDeath();
-            if (millis > 1000) continue;
+            if (millis > deathAnimations.getDeathCacheIgnore()) continue;
 
             // Simulate the player dying for the user
             // We first need to send a health packet because Mojank:tm:
@@ -76,16 +77,26 @@ public class OutgoingPlayerDeathListener extends PacketListenerAbstract {
             event.setCancelled(true);
         }
 
-        // Sends the remove packet 1s later for any valid entities
-        Bukkit.getAsyncScheduler().runDelayed(deathAnimations, (task) -> {
-            int[] entityIds = delayedSend.stream()
-                .filter(cache -> !shouldCancelRemovePacket(playerSendingTo, cache.player()))
-                .mapToInt(DeathListener.DeathCache::entityId)
-                .toArray();
+        // Can remove from this array if player logs out
+        awaitingRemovalPacket.add(delayedSend);
 
-            WrapperPlayServerDestroyEntities delayedRemovePacket = new WrapperPlayServerDestroyEntities(entityIds);
-            PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, delayedRemovePacket);
-        }, 1L, TimeUnit.SECONDS);
+        // Sends the remove packet 1s later for any valid entities
+        Bukkit.getAsyncScheduler()
+            .runDelayed(deathAnimations, (task) -> {
+
+                int[] entityIds = delayedSend.stream()
+                    .filter(cache -> !shouldCancelRemovePacket(playerSendingTo, cache.player()))
+                    .mapToInt(DeathListener.DeathCache::entityId)
+                    .toArray();
+
+                // We should cancel sending this packet if empty since the client hates it
+                if (entityIds.length == 0) {
+                    return;
+                }
+
+                WrapperPlayServerDestroyEntities delayedRemovePacket = new WrapperPlayServerDestroyEntities(entityIds);
+                PacketEvents.getAPI().getPlayerManager().sendPacket(playerSendingTo, delayedRemovePacket);
+            }, deathAnimations.getEntityRemoveDelay(), TimeUnit.MILLISECONDS);
 
         // Still send destroy packets for entities that we didn't affect.
         if (!remainingToSend.isEmpty()) {
@@ -98,11 +109,31 @@ public class OutgoingPlayerDeathListener extends PacketListenerAbstract {
         }
     }
 
+    public boolean cancelAwaitingRemoval(UUID playerUniqueId) {
+        boolean anyRemoved = false;
+        for (ArrayList<DeathListener.DeathCache> caches : awaitingRemovalPacket) {
+            boolean removed = caches.removeIf((d) -> d.player().getUniqueId() == playerUniqueId);
+            anyRemoved = removed || anyRemoved;
+        }
+
+        return anyRemoved;
+    }
+
     private boolean shouldCancelRemovePacket(Player sending, Player dead) {
         boolean world = sending.getWorld() == dead.getWorld();
-        boolean distance = sending.getLocation().distanceSquared(dead.getLocation()) <= cancelDistanceSquared;
+
+        // If they're not in the same world there's no way to see one another
+        if (!world) {
+            return false;
+        }
+
+        // If they can't already see each other
         boolean canSee = sending.canSee(dead) && dead.getGameMode() != GameMode.SPECTATOR;
 
-        return world && distance && canSee;
+        if (!canSee) {
+            return false;
+        }
+
+        return sending.getLocation().distanceSquared(dead.getLocation()) <= cancelDistanceSquared;
     }
 }
