@@ -1,5 +1,7 @@
-package co.pvphub.pda;
+package co.pvphub.pda.listener;
 
+import co.pvphub.pda.Compatibility;
+import co.pvphub.pda.DeathAnimationsPlugin;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;

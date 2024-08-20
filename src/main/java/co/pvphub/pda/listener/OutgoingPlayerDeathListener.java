@@ -1,5 +1,6 @@
-package co.pvphub.pda;
+package co.pvphub.pda.listener;
 
+import co.pvphub.pda.DeathAnimationsPlugin;
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketSendEvent;

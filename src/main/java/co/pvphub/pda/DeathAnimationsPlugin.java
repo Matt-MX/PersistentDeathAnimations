@@ -1,7 +1,10 @@
 package co.pvphub.pda;
 
+import co.pvphub.pda.listener.DeathListener;
+import co.pvphub.pda.listener.OutgoingPlayerDeathListener;
 import com.github.retrooper.packetevents.PacketEvents;
 import org.bukkit.Bukkit;
+import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.jetbrains.annotations.NotNull;
 
@@ -14,6 +17,24 @@ public class DeathAnimationsPlugin extends JavaPlugin {
     @Override
     public void onEnable() {
         saveDefaultConfig();
+        reload();
+
+        Objects.requireNonNull(Bukkit.getPluginCommand("death-animations-reload"))
+            .setExecutor(new DeathAnimationsCommand(this));
+    }
+
+    public void reload() {
+        if (deathListener != null) {
+            HandlerList.unregisterAll(deathListener);
+            getLogger().info("Unregistered DeathListener");
+        }
+
+        if (outgoingPacketListener != null) {
+            PacketEvents.getAPI()
+                .getEventManager()
+                .unregisterListeners(outgoingPacketListener);
+            getLogger().info("Unregistered OutgoingPlayerDeathListener");
+        }
 
         deathListener = new DeathListener(this);
         outgoingPacketListener = new OutgoingPlayerDeathListener(this);
