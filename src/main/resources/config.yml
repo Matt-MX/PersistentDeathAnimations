@@ -1,0 +1,27 @@
+# Can be used to look for bugs
+# Not recommended
+verbose: false
+
+# Delay of sending remove entity packet to players
+# after a fake death animation is played. (in milliseconds)
+# Default: 750
+remove-delay: 750
+
+# The maximum distance a player is away to play the fake animation (in blocks)
+# Options:
+#   - default
+#     Will use the server's simulation distance as maximum.
+#   - <double>
+#     Will use a provided double value as a maximum distance.
+#     e.g: 40.0
+play-distance-max: default
+
+debug:
+  # Timeout for removal of death cache (in ticks)
+  # Not recommended to modify
+  # Default: 25
+  death-cache-timeout: 25
+  # Timeout for ignoring of death cache when sending packet (in milliseconds)
+  # Not recommended to modify
+  # Default: 100
+  death-cache-ignore: 1000

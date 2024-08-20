@@ -5,49 +5,63 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class DeathListener implements Listener {
-    private final Map<Integer, DeathCache> deaths = Collections.synchronizedMap(new HashMap<>());
-    private final DeathAnimationsPlugin plugin;
+    private final @NotNull Map<Integer, DeathCache> deaths = new ConcurrentHashMap<>();
+    private final @NotNull DeathAnimationsPlugin plugin;
 
-    public DeathListener(DeathAnimationsPlugin plugin) {
+    public DeathListener(@NotNull DeathAnimationsPlugin plugin) {
         this.plugin = plugin;
     }
 
-    public DeathCache getCachedDeath(int entityId) {
+    public @Nullable DeathCache getCachedDeath(int entityId) {
         return deaths.get(entityId);
     }
 
     @EventHandler
-    public void onDeath(PlayerDeathEvent event) {
+    public void onDeath(@NotNull PlayerDeathEvent event) {
         if (Compatibility.isNPC(event.getEntity())) {
             return;
         }
 
-        // possible memory leak? shouldn't be a problem
         int entityId = event.getPlayer().getEntityId();
 
         DeathCache cache = new DeathCache(event.getPlayer(), System.currentTimeMillis(), entityId);
         deaths.put(entityId, cache);
 
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            if (deaths.get(entityId) == cache) {
-                deaths.remove(entityId);
-            }
-        }, 25L);
+        // Forcefully remove as a timeout to prevent memory leak
+        Bukkit.getScheduler()
+            .runTaskLater(plugin, () -> {
+                if (deaths.get(entityId) == cache) {
+                    deaths.remove(entityId);
+                }
+            }, plugin.getDeathCacheTimeout());
     }
 
     @EventHandler
-    public void onQuit(PlayerQuitEvent event) {
+    public void onQuit(@NotNull PlayerQuitEvent event) {
         deaths.remove(event.getPlayer().getEntityId());
     }
 
-    public record DeathCache(Player player, long timeOfDeath, int entityId) {
+    @EventHandler
+    public void onJoin(@NotNull PlayerJoinEvent event) {
+        // We should make sure that this is removed from any currently processing packets
+        boolean removed = plugin.getOutgoingPacketListener().cancelAwaitingRemoval(event.getPlayer().getUniqueId());
+
+        if (plugin.isVerbose() && removed) {
+            plugin.getLogger().info(String.format("Cancelled delay removal packet of %s due to login", event.getPlayer().getName()));
+        }
+    }
+
+    public record DeathCache(@NotNull Player player, long timeOfDeath, int entityId) {
+
         public long getMillisSinceDeath() {
             return System.currentTimeMillis() - timeOfDeath;
         }
