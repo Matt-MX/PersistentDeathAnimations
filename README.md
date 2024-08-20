@@ -23,3 +23,13 @@ if they can actually see each other (`Player#canSee(Player other)`).
 
 While not needed since the plugin won't really need any attention unless bugs
 are discovered, contributions are more than welcome.
+
+### Hooking in
+
+Add the jar as a local dependency to your project.
+
+Get the api instance using Bukkit's plugin manager by name.
+
+To prevent a death animation from playing, hook into the Bukkit `PlayerDeathEvent` with an event priority of more than `NORMAL`.
+
+You can then remove the cached death with `plugin.getDeathListener().removeCachedDeath(int entityId)` or peek it with `DeathListener#getCachedDeath(int entityId)`
